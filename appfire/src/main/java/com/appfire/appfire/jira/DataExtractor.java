@@ -6,8 +6,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -27,9 +30,10 @@ public class DataExtractor {
     private static List<Issue> fetchIssues() {
         List<Issue> allIssues = new ArrayList<>();
 
-        while (startAt < totalIssues) {
+        while (startAt < 70) { // should be totalIssues but takes too much time so testing with 70
             String url = JIRA_REST_API + "?jql=issuetype in (Bug,Documentation,Enhancement) and updated > startOfWeek()"
-                    + "&startAt=" + startAt + "&maxResults=" + PAGE_SIZE;
+                    + "&startAt=" + startAt + "&maxResults=" + PAGE_SIZE; // &expand=comments doesn't work because they are not fetched
+            System.out.println(url);
             JsonNode response = restTemplate.getForObject(url, JsonNode.class);
             if (response == null || !response.has("issues")) {
                 break;
@@ -60,16 +64,9 @@ public class DataExtractor {
                 }
                 issue.createDate = issueNode.get("fields").get("created").asText();
 
-                List<Comment> comments = new ArrayList<>();
-                JsonNode commentNode = issueNode.get("fields").get("comment");
-                if (commentNode != null && commentNode.has("comments")) {
-                    for (JsonNode comment : commentNode.get("comments")) {
-                        Comment currentComment = new Comment();
-                        currentComment.author = comment.get("author").get("name").asText();
-                        currentComment.text = comment.get("body").asText();
-                        comments.add(currentComment);
-                    }
-                }
+                String issueKey = issue.key;
+                List<Comment> comments = fetchCommentsByIssue(issueKey);
+
                 issue.comments = comments;
                 allIssues.add(issue);
             }
@@ -79,6 +76,21 @@ public class DataExtractor {
         return allIssues;
     }
 
+    public static List<Comment> fetchCommentsByIssue(String issueKey) {
+        List<Comment> comments = new ArrayList<>();
+        String url = String.format("https://jira.atlassian.com/rest/api/2/issue/%s/comment", issueKey);
+        System.out.println("Comment url = " + url);
+        JsonNode commentNode = restTemplate.getForObject(url, JsonNode.class);
+        if (commentNode != null && commentNode.has("comments")) {
+            for (JsonNode comment : commentNode.get("comments")) {
+                Comment currentComment = new Comment();
+                currentComment.author = comment.get("author").get("displayName").asText();
+                currentComment.text = comment.get("body").asText();
+                comments.add(currentComment);
+            }
+        }
+        return comments;
+    }
 
     public static void saveResultAsJson(List<Issue> issues) throws IOException {
         ObjectMapper mapper = new ObjectMapper();
@@ -88,7 +100,6 @@ public class DataExtractor {
         mapper.writeValue(file, issues);
         System.out.println("File path = " + file.getAbsolutePath());
     }
-
 
     //almost the same method
     public static void saveResultAsXML(List<Issue> issues) throws IOException {
@@ -101,9 +112,16 @@ public class DataExtractor {
     }
 
     public static void main(String[] args) throws IOException {
+
+        BufferedReader input = new BufferedReader(new InputStreamReader(System.in));
+        System.out.println("This is your last chance. After this, there is no turning back.\n" +
+                "You take the blue pill(XML) – the story ends, you wake up in your bed and believe whatever you want to believe.\n" +
+                "You take the red(JSON) pill – you stay in Wonderland, and I show you how deep the rabbit hole goes.");
+        System.out.println("What will you choose ...");
+        input.readLine();
         List<Issue> issues = fetchIssues();
         saveResultAsJson(issues);
-//    saveResultAsXML(issues);
+        saveResultAsXML(issues);
     }
 
 
