@@ -40,7 +40,7 @@ public class DataExtractor {
                 break;
             }
             totalIssues = response.get("total").asInt();
-            System.out.println("Total issues = " + totalIssues); //not great place to count, but 1 less call to API
+            // System.out.println("Total issues = " + totalIssues); //not great place to count, but 1 less call to API
             restCalls++;
 
             if (response.has("total")) {
@@ -81,7 +81,7 @@ public class DataExtractor {
     public static List<Comment> fetchCommentsByIssue(String issueKey) {
         List<Comment> comments = new ArrayList<>();
         String url = String.format("https://jira.atlassian.com/rest/api/2/issue/%s/comment", issueKey);
-        System.out.println("Comment url = " + url);
+        // System.out.println("Comment url = " + url);
         JsonNode commentNode = restTemplate.getForObject(url, JsonNode.class);
         if (commentNode != null && commentNode.has("comments")) {
             for (JsonNode comment : commentNode.get("comments")) {
@@ -128,6 +128,7 @@ public class DataExtractor {
         saveResultAsXML(issues);
         long endTime = System.currentTimeMillis();
         timeToComplete = (endTime - currentTime) / 1000;
+        System.out.println("Total issues fetched = " + totalIssues);
         System.out.println("Comments rest calls = " + restCallsForComments);
         System.out.println("Task complete in " + timeToComplete + " seconds.");
     }
