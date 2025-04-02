@@ -6,123 +6,122 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
-
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.*;
 
 public class DataExtractor {
-    //private static final String JIRA_REST_API = "https://jira.atlassian.com/rest/api/2/search?jql=issuetype in (Bug,Documentation,Enhancement) and updated > startOfWeek()";
-    // private static final String JIRA_REST_API = "https://jira.atlassian.com/rest/api/2/search?jql=issuetype in (Bug,Documentation,Enhancement) and updated > startOfYear()";
     private static final String JIRA_REST_API = "https://jira.atlassian.com/rest/api/2/search";
     private static final String JIRA_BASE_BROWSE_URL = "https://jira.atlassian.com/browse/";
     private static final int PAGE_SIZE = 50;
+    private static int MAX_RESULTS = 50;
 
     static RestTemplate restTemplate = new RestTemplate();
-    static int startAt = 0;
-    static int totalIssues = Integer.MAX_VALUE;
-    static int restCalls = 0;
 
+    public static List<Issue> fetchIssues() {
+        List<Issue> allIssues = new CopyOnWriteArrayList<>();
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
-    private static List<Issue> fetchIssues() {
-        List<Issue> allIssues = new ArrayList<>();
-
-        while (startAt < 70) { // should be totalIssues but takes too much time so testing with 70
-            String url = JIRA_REST_API + "?jql=issuetype in (Bug,Documentation,Enhancement) and updated > startOfWeek()"
-                    + "&startAt=" + startAt + "&maxResults=" + PAGE_SIZE; // &expand=comments doesn't work because they are not fetched
-            System.out.println(url);
-            JsonNode response = restTemplate.getForObject(url, JsonNode.class);
-            if (response == null || !response.has("issues")) {
-                break;
+        try {
+            List<Future<Void>> futures = new ArrayList<>();
+            for (int startAt = 0; startAt < MAX_RESULTS; startAt += PAGE_SIZE) {
+                int finalStartAt = startAt;
+                futures.add(executor.submit(() -> {
+                    fetchIssuesBatch(finalStartAt, allIssues);
+                    return null;
+                }));
             }
-            totalIssues = response.get("total").asInt();
-            System.out.println("Total issues = " + totalIssues); //not great place to count, but 1 less call to API
-            restCalls++;
-
-            if (response.has("total")) {
-                totalIssues = response.get("total").asInt();
-            }
-
-            for (JsonNode issueNode : response.get("issues")) {
-                Issue issue = new Issue();
-                issue.key = issueNode.get("key").asText();
-                issue.url = JIRA_BASE_BROWSE_URL + issue.key;
-                issue.summary = issueNode.get("fields").get("summary").asText();
-                issue.type = issueNode.get("fields").get("issuetype").get("name").asText();
-
-                //I assume we want to display priority as String / Low, High, Critical ... etc
-                issue.priority = issueNode.get("fields").get("priority").asText();
-                issue.description = issueNode.get("fields").get("description").asText();
-                //reporter name is unreadable like "name -> {TextNode@4585} ""5479fe2c9e8b"
-
-                if (response.has("reporter")) {
-                    issue.reporter = issueNode.get("fields").get("reporter") != null ? issueNode.get("fields").get("displayName").asText() : "No reporter";
-
-                }
-                issue.createDate = issueNode.get("fields").get("created").asText();
-
-                String issueKey = issue.key;
-                List<Comment> comments = fetchCommentsByIssue(issueKey);
-
-                issue.comments = comments;
-                allIssues.add(issue);
-            }
-            startAt += PAGE_SIZE;
+            for (Future<Void> future : futures) future.get(); // Wait for all threads
+        } catch (InterruptedException | ExecutionException e) {
+            e.printStackTrace();
+        } finally {
+            executor.shutdown();
         }
-        System.out.println(restCalls);
         return allIssues;
     }
 
-    public static List<Comment> fetchCommentsByIssue(String issueKey) {
-        List<Comment> comments = new ArrayList<>();
-        String url = String.format("https://jira.atlassian.com/rest/api/2/issue/%s/comment", issueKey);
-        System.out.println("Comment url = " + url);
-        JsonNode commentNode = restTemplate.getForObject(url, JsonNode.class);
-        if (commentNode != null && commentNode.has("comments")) {
-            for (JsonNode comment : commentNode.get("comments")) {
-                Comment currentComment = new Comment();
-                currentComment.author = comment.get("author").get("displayName").asText();
-                currentComment.text = comment.get("body").asText();
-                comments.add(currentComment);
-            }
+
+    private static void fetchIssuesBatch(int startAt, List<Issue> allIssues) {
+        String url = JIRA_REST_API + "?jql=issuetype in (Bug,Documentation,Enhancement) and updated > startOfWeek()"
+                + "&startAt=" + startAt + "&maxResults=" + PAGE_SIZE;
+        JsonNode response = restTemplate.getForObject(url, JsonNode.class);
+
+        if (response == null || !response.has("issues")) {
+            return;
         }
+
+        response.get("issues").forEach(issueNode -> {
+            Issue issue = new Issue();
+            issue.key = issueNode.path("key").asText();
+            issue.url = JIRA_BASE_BROWSE_URL + issue.key;
+            issue.summary = issueNode.path("fields").path("summary").asText();
+            issue.type = issueNode.path("fields").path("issuetype").path("name").asText();
+            issue.priority = issueNode.path("fields").path("priority").asText("Unspecified");
+            issue.description = issueNode.path("fields").path("description").asText();
+            issue.reporter = issueNode.path("fields").path("reporter").path("displayName").asText("No reporter");
+            issue.createDate = issueNode.path("fields").path("created").asText();
+
+            issue.comments = fetchCommentsByIssue(issue.key);
+            allIssues.add(issue);
+        });
+    }
+
+    public static List<Comment> fetchCommentsByIssue(String issueKey) {
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        List<Comment> comments = new CopyOnWriteArrayList<>();
+
+        executor.submit(() -> {
+            String url = "https://jira.atlassian.com/rest/api/2/issue/" + issueKey + "/comment";
+            JsonNode commentNode = restTemplate.getForObject(url, JsonNode.class);
+            if (commentNode != null && commentNode.has("comments")) {
+                commentNode.get("comments").forEach(comment -> {
+                    Comment currentComment = new Comment();
+                    currentComment.author = comment.path("author").path("displayName").asText();
+                    currentComment.text = comment.path("body").asText();
+                    comments.add(currentComment);
+                });
+            }
+        });
+
+        executor.shutdown();
         return comments;
+    }
+
+    private static int totalIssuesCount() {
+        String url = JIRA_REST_API + "?jql=issuetype in (Bug,Documentation,Enhancement) and updated > startOfWeek()";
+        JsonNode response = restTemplate.getForObject(url, JsonNode.class);
+        if (response == null || !response.has("total")) {
+            return MAX_RESULTS; //default value is limited by Jira to 50
+        }
+        return MAX_RESULTS = response.get("total").asInt();
     }
 
     public static void saveResultAsJson(List<Issue> issues) throws IOException {
         ObjectMapper mapper = new ObjectMapper();
         mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-
         File file = new File("Jira_Issues_" + System.currentTimeMillis() + ".json");
         mapper.writeValue(file, issues);
         System.out.println("File path = " + file.getAbsolutePath());
     }
 
-    //almost the same method
     public static void saveResultAsXML(List<Issue> issues) throws IOException {
         ObjectMapper mapper = new XmlMapper();
         mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-
         File file = new File("Jira_Issues_" + System.currentTimeMillis() + ".xml");
         mapper.writeValue(file, issues);
         System.out.println("File path = " + file.getAbsolutePath());
     }
 
     public static void main(String[] args) throws IOException {
-
-        BufferedReader input = new BufferedReader(new InputStreamReader(System.in));
-        System.out.println("This is your last chance. After this, there is no turning back.\n" +
-                "You take the blue pill(XML) – the story ends, you wake up in your bed and believe whatever you want to believe.\n" +
-                "You take the red(JSON) pill – you stay in Wonderland, and I show you how deep the rabbit hole goes.");
-        System.out.println("What will you choose ...");
-        input.readLine();
+        long startTimeInMilis = System.currentTimeMillis();
+        System.out.println("Total issue count = " + totalIssuesCount());
         List<Issue> issues = fetchIssues();
         saveResultAsJson(issues);
         saveResultAsXML(issues);
+        long endTimeInMilis = System.currentTimeMillis();
+        double timeInSeconds = (double) (endTimeInMilis - startTimeInMilis) / 1000;
+        System.out.println("Time to proceed using virtual threads = " + timeInSeconds + " seconds.");
     }
-
-
 }
