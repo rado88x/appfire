@@ -28,7 +28,7 @@ public class DataExtractor {
     static int restCallsForComments = 0;
 
 
-    private static List<Issue> fetchIssues() {
+    public static List<Issue> fetchIssues() {
         List<Issue> allIssues = new ArrayList<>();
 
         while (startAt < totalIssues) { // should be totalIssues but takes too much time so testing with 70
@@ -49,21 +49,21 @@ public class DataExtractor {
 
             for (JsonNode issueNode : response.get("issues")) {
                 Issue issue = new Issue();
-                issue.key = issueNode.get("key").asText();
+                issue.key = issueNode.path("key").asText();
                 issue.url = JIRA_BASE_BROWSE_URL + issue.key;
-                issue.summary = issueNode.get("fields").get("summary").asText();
-                issue.type = issueNode.get("fields").get("issuetype").get("name").asText();
+                issue.summary = issueNode.path("fields").path("summary").asText();
+                issue.type = issueNode.path("fields").get("issuetype").path("name").asText();
 
                 //I assume we want to display priority as String / Low, High, Critical ... etc
-                issue.priority = issueNode.get("fields").get("priority").asText();
-                issue.description = issueNode.get("fields").get("description").asText();
+                issue.priority = issueNode.path("fields").path("priority").asText();
+                issue.description = issueNode.path("fields").path("description").asText();
 
                 //reporter name is unreadable like "name -> {TextNode@4585} ""5479fe2c9e8b"
                 if (response.has("reporter")) {
-                    issue.reporter = issueNode.get("fields").get("reporter") != null ? issueNode.get("fields").get("displayName").asText() : "No reporter";
+                    issue.reporter = issueNode.path("fields").path("reporter") != null ? issueNode.path("fields").get("displayName").asText() : "No reporter";
 
                 }
-                issue.createDate = issueNode.get("fields").get("created").asText();
+                issue.createDate = issueNode.path("fields").path("created").asText();
 
                 String issueKey = issue.key;
                 List<Comment> comments = fetchCommentsByIssue(issueKey);
@@ -84,10 +84,10 @@ public class DataExtractor {
         // System.out.println("Comment url = " + url);
         JsonNode commentNode = restTemplate.getForObject(url, JsonNode.class);
         if (commentNode != null && commentNode.has("comments")) {
-            for (JsonNode comment : commentNode.get("comments")) {
+            for (JsonNode comment : commentNode.path("comments")) {
                 Comment currentComment = new Comment();
-                currentComment.author = comment.get("author").get("displayName").asText();
-                currentComment.text = comment.get("body").asText();
+                currentComment.author = comment.path("author").path("displayName").asText();
+                currentComment.text = comment.path("body").asText();
                 comments.add(currentComment);
             }
         }
