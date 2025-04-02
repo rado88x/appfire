@@ -25,12 +25,13 @@ public class DataExtractor {
     static int startAt = 0;
     static int totalIssues = Integer.MAX_VALUE;
     static int restCalls = 0;
+    static int restCallsForComments = 0;
 
 
     private static List<Issue> fetchIssues() {
         List<Issue> allIssues = new ArrayList<>();
 
-        while (startAt < 70) { // should be totalIssues but takes too much time so testing with 70
+        while (startAt < totalIssues) { // should be totalIssues but takes too much time so testing with 70
             String url = JIRA_REST_API + "?jql=issuetype in (Bug,Documentation,Enhancement) and updated > startOfWeek()"
                     + "&startAt=" + startAt + "&maxResults=" + PAGE_SIZE; // &expand=comments doesn't work because they are not fetched
             System.out.println(url);
@@ -56,8 +57,8 @@ public class DataExtractor {
                 //I assume we want to display priority as String / Low, High, Critical ... etc
                 issue.priority = issueNode.get("fields").get("priority").asText();
                 issue.description = issueNode.get("fields").get("description").asText();
-                //reporter name is unreadable like "name -> {TextNode@4585} ""5479fe2c9e8b"
 
+                //reporter name is unreadable like "name -> {TextNode@4585} ""5479fe2c9e8b"
                 if (response.has("reporter")) {
                     issue.reporter = issueNode.get("fields").get("reporter") != null ? issueNode.get("fields").get("displayName").asText() : "No reporter";
 
@@ -69,10 +70,11 @@ public class DataExtractor {
 
                 issue.comments = comments;
                 allIssues.add(issue);
+                restCallsForComments++;
             }
             startAt += PAGE_SIZE;
         }
-        System.out.println(restCalls);
+        System.out.println("Rest calls for pages = " + restCalls);
         return allIssues;
     }
 
@@ -119,9 +121,15 @@ public class DataExtractor {
                 "You take the red(JSON) pill – you stay in Wonderland, and I show you how deep the rabbit hole goes.");
         System.out.println("What will you choose ...");
         input.readLine();
+        double timeToComplete = 0;
+        long currentTime = System.currentTimeMillis();
         List<Issue> issues = fetchIssues();
         saveResultAsJson(issues);
         saveResultAsXML(issues);
+        long endTime = System.currentTimeMillis();
+        timeToComplete = (endTime - currentTime) / 1000;
+        System.out.println("Comments rest calls = " + restCallsForComments);
+        System.out.println("Task complete in " + timeToComplete + " seconds.");
     }
 
 
