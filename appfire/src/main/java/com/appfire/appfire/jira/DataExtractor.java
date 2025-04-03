@@ -17,8 +17,8 @@ public class DataExtractor {
     private static final String JIRA_BASE_BROWSE_URL = "https://jira.atlassian.com/browse/";
     private static final int PAGE_SIZE = 50;
     private static int MAX_RESULTS = 50;
-    //    private static ExecutorService executor = Executors.newFixedThreadPool(10);
-    private static ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+    private static ExecutorService executor = Executors.newFixedThreadPool(10);
+//    private static ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
 
     static RestTemplate restTemplate = new RestTemplate();
@@ -26,7 +26,7 @@ public class DataExtractor {
     public static List<Issue> fetchIssues() {
         List<Issue> allIssues = new CopyOnWriteArrayList<>();
         //executor = Executors.newFixedThreadPool(10);
-        executor = Executors.newVirtualThreadPerTaskExecutor();
+        executor = Executors.newFixedThreadPool(5);
 
 
         try {
@@ -72,7 +72,7 @@ public class DataExtractor {
     }
 
     public static List<Comment> fetchCommentsByIssue(String issueKey) {
-        executor = Executors.newVirtualThreadPerTaskExecutor();
+        executor = Executors.newFixedThreadPool(5);
         List<Comment> comments = new CopyOnWriteArrayList<>();
 
         executor.submit(() -> {
@@ -121,11 +121,25 @@ public class DataExtractor {
         long startTimeInMilis = System.currentTimeMillis();
         System.out.println("Total issue count = " + totalIssuesCount());
         List<Issue> issues = fetchIssues();
-        executor.shutdownNow();  // so untypical place to shutdown the executor...
+        try {
+            if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
+                executor.shutdownNow(); // Force shutdown if tasks didn't finish
+            }
+
+        } catch (InterruptedException e) {
+            System.out.println("great...");
+            throw new RuntimeException(e);
+        } finally {
+            Thread.currentThread().interrupt();
+            executor.shutdownNow();
+        }
+
+
         saveResultAsJson(issues);
         saveResultAsXML(issues);
         long endTimeInMilis = System.currentTimeMillis();
         double timeInSeconds = (double) (endTimeInMilis - startTimeInMilis) / 1000;
+        System.out.println("Thread count = 10");
         System.out.println("Time to proceed using virtual threads = " + timeInSeconds + " seconds.");
     }
 }
