@@ -17,13 +17,17 @@ public class DataExtractor {
     private static final String JIRA_BASE_BROWSE_URL = "https://jira.atlassian.com/browse/";
     private static final int PAGE_SIZE = 50;
     private static int MAX_RESULTS = 50;
+    //    private static ExecutorService executor = Executors.newFixedThreadPool(10);
     private static ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
 
     static RestTemplate restTemplate = new RestTemplate();
 
     public static List<Issue> fetchIssues() {
         List<Issue> allIssues = new CopyOnWriteArrayList<>();
+        //executor = Executors.newFixedThreadPool(10);
         executor = Executors.newVirtualThreadPerTaskExecutor();
+
 
         try {
             List<Future<Void>> futures = new ArrayList<>();
@@ -84,7 +88,7 @@ public class DataExtractor {
             }
         });
 
-         executor.shutdown(); // last operation is to fetch comments for each task , but probably should shutdown executor on better place
+        // executor.shutdown(); // last operation is to fetch comments for each task , but probably should shutdown executor on better place
         return comments;
     }
 
@@ -117,7 +121,7 @@ public class DataExtractor {
         long startTimeInMilis = System.currentTimeMillis();
         System.out.println("Total issue count = " + totalIssuesCount());
         List<Issue> issues = fetchIssues();
-        // executor.shutdown();  // so untypical place to shutdown the executor...
+        executor.shutdownNow();  // so untypical place to shutdown the executor...
         saveResultAsJson(issues);
         saveResultAsXML(issues);
         long endTimeInMilis = System.currentTimeMillis();
